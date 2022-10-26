@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "doomai"
+name = "idgames"
 version = "0.1.0"
-description = "Python code for applying AI to Doom"
+description = "Codebase for data mining /idgames"
 authors = ["Matthew McAllister <matthew.mcallister.0@gmail.com>"]
 readme = "README.md"
-packages = [{include = "scrape"}]
+packages = [{include = "idgames"}]
 
 [tool.poetry.dependencies]
 python = "^3.7"
