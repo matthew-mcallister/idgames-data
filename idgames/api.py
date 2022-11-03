@@ -1,20 +1,33 @@
 from __future__ import annotations
 
+import zipfile
 from dataclasses import dataclass
-from typing import Iterator
 from pathlib import Path
+from typing import Iterator
 
 import click
 import requests
 
-
-ROOT_DIR = Path(__file__).parent / 'data'
+from idgames import ROOT_DIR
 
 
 def _request(action: str, **params: str) -> requests.Response:
     url = 'https://www.doomworld.com/idgames/api/api.php'
     params = {'out': 'json', 'action': action, **params}
     return requests.get(url, params=params)
+
+
+MIRRORS = [
+    'http://mirrors.syringanetworks.net/idgames',
+    'https://youfailit.net/pub/idgames',
+    'https://www.gamers.org/pub/idgames',
+]
+
+MIRROR = MIRRORS[0]
+
+
+DOWNLOAD_DIR = ROOT_DIR / 'download'
+WAD_DIR = ROOT_DIR / 'wads'
 
 
 @dataclass
@@ -41,8 +54,13 @@ class File:
     votes: int | None = None
 
     @property
+    def download_url(self) -> str:
+        return MIRROR + '/' + self.dir + '/' + self.filename
+
+    @property
     def download_path(self) -> Path:
-        return ROOT_DIR / self.dir / self.filename
+        filename = (self.dir + '/' + self.filename).replace('/', '::')
+        return DOWNLOAD_DIR / filename
 
 
 @dataclass
@@ -162,9 +180,22 @@ def file(ids: list[str], verbose: bool) -> None:
             print('description:', file['description'].split('\n', 1)[0] + '...')
 
 
+def sizeof_fmt(num, suffix="B"):
+    """Copyright Fred Cirera according to StackOverflow."""
+    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f}{unit}{suffix}"
+        num /= 1024.0
+    return f'{num:.1f}Yi{suffix}'
+
+
 @cli.command
 @click.argument('path')
-def fetch(path: str) -> None:
+@click.option('--mirror', '-m', default=0)
+def fetch(path: str, mirror: int) -> None:
+    global MIRROR
+    MIRROR = MIRRORS[mirror]
+
     root = Directory.tree(path)
     all_files = list(root.files_recursive())
     files_to_fetch: list[File] = []
@@ -173,11 +204,33 @@ def fetch(path: str) -> None:
             files_to_fetch.append(file)
     count = len(files_to_fetch)
     for i, file in enumerate(files_to_fetch):
-        print(f'{i}/{count}', file.id, file.title)
-        response = requests.get(file.url)
+        print(f'{i}/{count}', sizeof_fmt(file.size), file.id, file.title)
+        response = requests.get(file.download_url)
         response.raise_for_status()
         file.download_path.parent.mkdir(parents=True, exist_ok=True)
         file.download_path.write_bytes(response.content)
+
+
+def extract_zip(path: Path) -> None:
+    zip = zipfile.ZipFile(path)
+    for info in zip.infolist():
+        fname = info.filename.lower()
+        if fname.endswith(('.wad', '.pk3')):
+            info.filename = path.with_suffix('').name + '::' + fname.replace('/', '::')
+            zip.extract(info, WAD_DIR)
+
+
+@cli.command
+def extract() -> None:
+    """Extracts all WAD and PK3 files from the zip files under the default
+    download directory.
+    """
+    WAD_DIR.mkdir(parents=True, exist_ok=True)
+    for path in (DOWNLOAD_DIR).iterdir():
+        try:
+            extract_zip(path)
+        except Exception as e:
+            print(f'Failed to extract {path}: {e}')
 
 
 if __name__ == '__main__':
